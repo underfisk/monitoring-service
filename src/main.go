@@ -5,7 +5,7 @@ import (
 	"log"
 	"net/http"
 
-	"github.com/underfisk/monitoring-service"
+	"github.com/underfisk/monitoring-service/core"
 )
 
 /**
@@ -22,7 +22,6 @@ import (
 func main () {
 	print("Running monitoring Service on port: 4000 for now")
 
-	var mc = NewMainController()
 
 
 	http.HandleFunc("/bar",
