@@ -1,25 +1,19 @@
-package main
+package core
 
-type LogSender struct {
-	id int
-	name string
-	sentAt string
-	applicationId int
 
-}
+type LogType int32
 
-type LogType struct {
+const (
+	ERROR LogType = 0
+	LOG LogType = 1
+)
 
-}
-
-/** JSON like**/
-type LogPayload struct {
-
-}
 
 type Log struct {
-	sender LogSender
+	id int
+	name string
+	applicationId int
 	_type LogType
-	payload LogPayload
+	payload interface {}
 }
 
