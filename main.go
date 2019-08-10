@@ -1,20 +1,24 @@
-package MonitoringService
+package main
 
 import (
 	"context"
-	"fmt"
-	"github.com/gorilla/mux"
+	"github.com/dgrijalva/jwt-go"
+	"github.com/google/uuid"
+	"github.com/labstack/echo/middleware"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 	"log"
 	"net/http"
 	"time"
-	"github.com/underfisk/monitoring-service/core"
+	. "github.com/underfisk/monitorservice/src"
+	"github.com/labstack/echo"
 )
 
 
 var (
 	repo *Repository
+	userRepo *UserRepository
+	jwtSecret = "SOMETHING THAT WILL COME FROM PROCESS.ENV"
 )
 
 /**
@@ -42,61 +46,112 @@ func main () {
 
 	client.Connect(ctx)
 	repo = NewRepository(client)
+	userRepo = NewUserRepository(client)
 
-	r := mux.NewRouter()
+/*	r := mux.NewRouter()
 	r.HandleFunc("/log", onLogPost).Methods("POST")
 	r.HandleFunc("/log", onLogsRetrieve).Methods("GET")
+*/
+
+	e := echo.New()
+
+	//Middlewares
+	e.Use(middleware.Recover())
+
+	//Routes
+	e.GET("/log", onLogsRetrieve)
+	e.POST("/login", login)
+
+	r := e.Group("/")
+	r.Use(middleware.JWT([]byte(jwtSecret)))
+	r.POST("/log", onLogPost)
 
 
-	srv := &http.Server{
-		Handler:      r,
-		Addr:         ":4000",
-		// Good practice: enforce timeouts for servers you create!
-		WriteTimeout: 15 * time.Second,
-		ReadTimeout:  15 * time.Second,
-	}
-
-	log.Fatal(srv.ListenAndServe())
+	e.Logger.Fatal( e.Start(":4000"))
 }
 
-func onLogPost (w http.ResponseWriter, r *http.Request) {
-	fmt.Fprint(w, "We got a new log post to insert")
+type LogDataDto struct {
+	Name string `json:name`
+	Env string `json:env`
+	Content string `json:content`
+	Severity SeverityType `json:severity`
+	Type LogType `json:type`
+
 }
 
-func onLogsRetrieve (w http.ResponseWriter, r *http.Request) {
-	//cc, _ := context.WithTimeout(context.Background(), 5*time.Second)
-/*	ctx, _ := context.WithTimeout(context.Background(), 5*time.Second)
-	collection := mongoClient.Database("top").Collection("emaillogs")
-	//count, _ := collection.CountDocuments(context.WithTimeout(context.Background(), 5*time.Second))
-	list, err := collection.Find(ctx, bson.D{})
 
+func login(c echo.Context) error {
+	username := c.FormValue("username")
+	password := c.FormValue("password")
+
+	user,err := userRepo.GetByCredentials(username, password)
 	if err != nil {
-		log.Fatal(err)
+		return echo.ErrUnauthorized
 	}
 
-	defer list.Close(ctx)
+	// Create token
+	token := jwt.New(jwt.SigningMethodHS256)
 
-	for list.Next(ctx) {
-		var result bson.M
-		err := list.Decode(&result)
-		if err != nil { log.Fatal(err) }
+	// Set claims
+	claims := token.Claims.(jwt.MapClaims)
+	claims["name"] = user.Name
+	claims["id"] = user.Id
+	claims["exp"] = time.Now().Add(time.Hour * 72).Unix()
 
-		fmt.Fprintf(w, "%+v\n", result)
-	}*/
+	// Generate encoded token and send it as response.
+	t, err := token.SignedString([]byte(jwtSecret))
+	if err != nil {
+		return err
+	}
 
-	res, err := repo.CreateLog(Log{
-		applicationId: 1,
-		name: "TEST",
-		_type: ERROR,
-		payload: "SOMETHING",
+	return c.JSON(http.StatusOK, map[string]string{
+		"access_token": t,
+	})
+}
+
+func onLogPost (c echo.Context) error {
+	log.Println("We got a new log post to insert")
+
+	data := new(LogDataDto)
+	if err := c.Bind(data); err != nil {
+		return err
+	}
+
+	//Replace with "token" userId
+	tokenUserId := uuid.UUID {}
+
+	row, err := repo.CreateLog(Log{
+		Name: data.Name,
+		Environment: data.Env,
+		Type: data.Type,
+		Content: data.Content,
+		UserId: tokenUserId,
 	})
 
 	if err != nil {
-		fmt.Fprintf(w, err.Error())
+		return err
 	}
 
-	fmt.Fprint(w, res)
+	var res struct {
+		Id string `json:id`
+	}
+	res.Id = row.Id.String()
 
+	return c.JSON(200, &row)
+}
 
-	fmt.Fprintf(w, "Displaying the logs")
+func onLogsRetrieve (c echo.Context) error {
+	id := c.QueryParam("id")
+	parsedId,_ := uuid.Parse(id)
+
+	log.Println( parsedId)
+	data, err := repo.FindLog( parsedId )
+
+	if err != nil {
+		log.Println("Error retriveing the logs")
+		log.Println(err)
+		return err
+	}
+
+	return c.JSON(http.StatusOK, data)
 }

@@ -1,10 +1,12 @@
-package core
+package monitorservice
 
 import (
 	"context"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"time"
+	"github.com/google/uuid"
+	"fmt"
 )
 
 type Repository struct {
@@ -17,22 +19,45 @@ func NewRepository (mongoClient *mongo.Client) *Repository {
 	}
 }
 
-func (r *Repository) CreateLog (log Log) ( interface {}, error){
+func (r *Repository) CreateLog (log Log) ( Log, error){
 	ctx, _ := context.WithTimeout(context.Background(), 5*time.Second)
 	collection := r.mongo.Database("monitor_service").Collection("app_logs")
-	res, err := collection.InsertOne(ctx, bson.M{
-		"name": log.name,
-		"applicationId": log.applicationId,
-		"payload": log.payload,
-		"_type": log._type,
+	id, _ := uuid.NewUUID()
+	_, err := collection.InsertOne(ctx, bson.M{
+		"_id":			 id.String(),
+		"name":          log.Name,
+		"userId": 		log.UserId,
+		"content":       log.Content,
+		"_type":         log.Type,
+		"occuredAt":	 time.Now(),
 	})
 
 	if err != nil {
-		return -1, err
+		fmt.Println("Error: ", err)
+		return Log{}, err
 	}
 
-	id := res.InsertedID
-
-	return id, nil
+	return Log{
+		Id: id,
+		Name: log.Name,
+		Content: log.Content,
+		Type: log.Type,
+		OccurredAt: time.Now(),
+		UserId: log.UserId,
+	}, nil
 }
 
+func (r *Repository) FindLog (id uuid.UUID) ( interface {}, error ) {
+	ctx, _ := context.WithTimeout(context.Background(), 5*time.Second)
+	collection := r.mongo.Database("monitor_service").Collection("app_logs")
+
+	var log Log
+	err := collection.FindOne(ctx, bson.M{ "_id": id.String() }).Decode(&log)
+
+	if err != nil {
+		return nil, err
+	}
+
+	log.Id = id
+	return log, nil
+}
